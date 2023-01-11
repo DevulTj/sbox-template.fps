@@ -8,7 +8,6 @@ namespace Facepunch.Gunfight.Mechanics;
 public partial class JumpMechanic : PlayerControllerMechanic
 {
 	public override int SortOrder => 25;
-	private float Gravity => 700f;
 
 	protected override bool ShouldStart()
 	{
@@ -20,13 +19,28 @@ public partial class JumpMechanic : PlayerControllerMechanic
 	protected override void OnStart()
 	{
 		float flGroundFactor = 1.0f;
-		float flMul = 250f;
-		float startz = Velocity.z;
+		float flMul = CalculateJumpForce();
 
-		Velocity = Velocity.WithZ( startz + flMul * flGroundFactor );
-		Velocity -= new Vector3( 0, 0, Gravity * 0.5f ) * Time.Delta;
+		Velocity -= Player.GravityDirection * flMul * flGroundFactor;
+		Velocity += Player.Gravity * 0.5f * Time.Delta;
 
 		Controller.GetMechanic<WalkMechanic>()
 			.ClearGroundEntity();
 	}
+
+	/// <summary>
+	/// The lower the gravity, the higher the player can jump.
+	/// Unless in zero-gravity.
+	/// </summary>
+	/// <returns></returns>
+	private float CalculateJumpForce()
+	{
+		if ( Player.Gravity.Length == 0 )
+		{
+			return 0;
+		}
+		var multiplier = 1f / (Player.Gravity.Length / 800f);
+		return 250f * multiplier;
+	}
+	
 }

@@ -26,6 +26,14 @@ public partial class Player : AnimatedEntity
 	/// Time since the player last took damage.
 	/// </summary>
 	[Net, Predicted] public TimeSince TimeSinceDamage { get; set; }
+	/// <summary>
+	/// Active gravitational force
+	/// </summary>
+	[Net] public Vector3 Gravity { get; set; } = Game.PhysicsWorld.Gravity;
+	/// <summary>
+	/// Active gravitational force direction
+	/// </summary>
+	[Net] public Vector3 GravityDirection { get; set; } = Game.PhysicsWorld.Gravity.Normal;
 
 	/// <summary>
 	/// Accessor for getting a player's active weapon.
@@ -73,7 +81,7 @@ public partial class Player : AnimatedEntity
 	/// <summary>
 	/// Called when a player respawns, think of this as a soft spawn - we're only reinitializing transient data here.
 	/// </summary>
-	public void Respawn()
+	public virtual void Respawn()
 	{
 		SetupPhysicsFromAABB( PhysicsMotionType.Keyframed, new Vector3( -16, -16, 0 ), new Vector3( 16, 16, 72 ) );
 
@@ -87,7 +95,10 @@ public partial class Player : AnimatedEntity
 			.ToList()
 			.ForEach( x => x.EnableDrawing = true );
 
-		Components.Create<PlayerController>();
+		var ctrl = Components.Create<PlayerController>();
+		// Reset some helper data
+		ctrl.LastInputRotation = Rotation.Identity;
+		Velocity = Vector3.Zero;
 
 		// Remove old mechanics.
 		Components.RemoveAny<PlayerControllerMechanic>();
@@ -118,7 +129,7 @@ public partial class Player : AnimatedEntity
 	/// Called clientside when the player respawns. Useful for adding components like the camera.
 	/// </summary>
 	[ClientRpc]
-	public void ClientRespawn()
+	public virtual void ClientRespawn()
 	{
 		PlayerCamera = new PlayerCamera();
 	}
@@ -129,8 +140,6 @@ public partial class Player : AnimatedEntity
 	/// <param name="cl"></param>
 	public override void Simulate( IClient cl )
 	{
-		Rotation = LookInput.WithPitch( 0f ).ToRotation();
-
 		Controller?.Simulate( cl );
 		Animator?.Simulate( cl );
 
@@ -147,7 +156,7 @@ public partial class Player : AnimatedEntity
 		PlayerCamera?.Update( this );
 
 		// Apply camera modifiers after a camera update.
-		CameraModifier.Apply();
+		CameraModifier.Apply( this );
 	}
 
 	/// <summary>
@@ -156,8 +165,6 @@ public partial class Player : AnimatedEntity
 	/// <param name="cl"></param>
 	public override void FrameSimulate( IClient cl )
 	{
-		Rotation = LookInput.WithPitch( 0f ).ToRotation();
-
 		Controller?.FrameSimulate( cl );
 		Animator?.FrameSimulate( cl );
 
@@ -258,7 +265,7 @@ public partial class Player : AnimatedEntity
 
 		TimeSinceFootstep = 0;
 
-		var tr = Trace.Ray( pos, pos + Vector3.Down * 20 )
+		var tr = Trace.Ray( pos, pos + GravityDirection * 20 )
 			.Radius( 1 )
 			.Ignore( this )
 			.Run();

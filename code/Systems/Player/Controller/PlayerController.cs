@@ -2,6 +2,7 @@ using Facepunch.Gunfight.Mechanics;
 using Sandbox;
 using System.Collections.Generic;
 using System.Linq;
+using Sandbox.Systems.Util;
 
 namespace Facepunch.Gunfight;
 
@@ -60,6 +61,7 @@ public partial class PlayerController : EntityComponent<Player>, ISingletonCompo
 	/// </summary>
 	public BBox Hull
 	{
+		// FIXME how to calculate the hull to work with different angles?
 		get
 		{
 			var girth = BodyGirth * 0.5f;
@@ -89,7 +91,7 @@ public partial class PlayerController : EntityComponent<Player>, ISingletonCompo
 
 	protected void SimulateEyes()
 	{
-		Player.EyeRotation = Player.LookInput.ToRotation();
+		Player.EyeRotation = Rotation * Rotation.FromPitch( Player.LookInput.ToRotation().Pitch() );
 		Player.EyeLocalPosition = Vector3.Up * CurrentEyeHeight;
 	}
 
@@ -115,7 +117,9 @@ public partial class PlayerController : EntityComponent<Player>, ISingletonCompo
 
 	public virtual void Simulate( IClient cl )
 	{
+		SimulateRotation();
 		SimulateEyes();
+		ProcessVelocity();
 		SimulateMechanics();
 
 		if ( Debug )
@@ -128,6 +132,7 @@ public partial class PlayerController : EntityComponent<Player>, ISingletonCompo
 
 			DebugOverlay.ScreenText( $"Player Controller", ++lineOffset );
 			DebugOverlay.ScreenText( $"       Position: {Position}", ++lineOffset );
+			DebugOverlay.ScreenText( $"       Rotation: {Rotation}", ++lineOffset );
 			DebugOverlay.ScreenText( $"        Velocity: {Velocity}", ++lineOffset );
 			DebugOverlay.ScreenText( $"    BaseVelocity: {BaseVelocity}", ++lineOffset );
 			DebugOverlay.ScreenText( $"    GroundEntity: {GroundEntity} [{GroundEntity?.Velocity}]", ++lineOffset );
@@ -144,6 +149,7 @@ public partial class PlayerController : EntityComponent<Player>, ISingletonCompo
 
 	public virtual void FrameSimulate( IClient cl )
 	{
+		SimulateRotation();
 		SimulateEyes();
 	}
 
@@ -154,15 +160,17 @@ public partial class PlayerController : EntityComponent<Player>, ISingletonCompo
 	/// </summary>
 	public virtual TraceResult TraceBBox( Vector3 start, Vector3 end, Vector3 mins, Vector3 maxs, float liftFeet = 0.0f, float liftHead = 0.0f )
 	{
+		var up = -Player.GravityDirection;
 		if ( liftFeet > 0 )
 		{
-			start += Vector3.Up * liftFeet;
-			maxs = maxs.WithZ( maxs.z - liftFeet );
+			start += up * liftFeet;
+			// FIXME this breaks gravity checks at certain angles, how to fix?
+			// maxs = maxs.WithZ( maxs.z - liftFeet );
 		}
 
 		if ( liftHead > 0 )
 		{
-			end += Vector3.Up * liftHead;
+			end += up * liftHead;
 		}
 
 		var tr = Trace.Ray( start, end )
@@ -210,7 +218,7 @@ public partial class PlayerController : EntityComponent<Player>, ISingletonCompo
 		return BestMechanic?.WishSpeed ?? 180f;
 	}
 
-	public void Accelerate( Vector3 wishdir, float wishspeed, float speedLimit, float acceleration )
+	public Vector3 Accelerate( Vector3 wishdir, float wishspeed, float speedLimit, float acceleration )
 	{
 		if ( speedLimit > 0 && wishspeed > speedLimit )
 			wishspeed = speedLimit;
@@ -219,14 +227,14 @@ public partial class PlayerController : EntityComponent<Player>, ISingletonCompo
 		var addspeed = wishspeed - currentspeed;
 
 		if ( addspeed <= 0 )
-			return;
+			return Vector3.Zero;
 
 		var accelspeed = acceleration * Time.Delta * wishspeed;
 
 		if ( accelspeed > addspeed )
 			accelspeed = addspeed;
 
-		Velocity += wishdir * accelspeed;
+		return wishdir * accelspeed;
 	}
 
 	public void ApplyFriction( float stopSpeed, float frictionAmount = 1.0f )
@@ -253,7 +261,7 @@ public partial class PlayerController : EntityComponent<Player>, ISingletonCompo
 
 	public void StepMove( float groundAngle = 46f, float stepSize = 18f )
 	{
-		MoveHelper mover = new MoveHelper( Position, Velocity );
+		var mover = new GravitationalMoveHelper( Position, Velocity, Player.GravityDirection );
 		mover.Trace = mover.Trace.Size( Hull )
 			.Ignore( Player )
 			.WithoutTags( "player" );
@@ -267,7 +275,7 @@ public partial class PlayerController : EntityComponent<Player>, ISingletonCompo
 
 	public void Move( float groundAngle = 46f )
 	{
-		MoveHelper mover = new MoveHelper( Position, Velocity );
+		var mover = new GravitationalMoveHelper( Position, Velocity, Player.GravityDirection );
 		mover.Trace = mover.Trace.Size( Hull )
 			.Ignore( Player )
 			.WithoutTags( "player" );
